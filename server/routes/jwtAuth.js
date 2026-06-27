@@ -1,83 +1,107 @@
-
 const router = require('express').Router();
 const pool = require('../db/db_connection');
 const bcrypt = require('bcrypt');
 const jwtGenerator = require('../utils/jwtGenerator');
 
-//registering
+/**
+ * ============================================================================
+ * AUTHENTICATION ROUTES
+ * These routes handle the most sensitive part of your API: User Identity.
+ * ============================================================================
+ */
 
-router.post('/register', async (req,res)=>{
+/**
+ * ROUTE: /auth/register
+ * PURPOSE: Onboard a new user by creating their identity in the database.
+ *
+ * PRODUCTION FLOW:
+ * 1. Input Validation -> 2. Conflict Check -> 3. Secure Hashing -> 4. Persistence -> 5. Session Grant
+ */
+router.post('/register', async (req, res) => {
     try {
-        // It is the 5 step process:
-        // 1. destructuring the req.body
+        const { name, email, password } = req.body;
 
-        const {name,email,password} = req.body;
+        /**
+         * PRODUCTION TIP: Input Validation
+         * In a real API, never assume the user sent a valid email or password.
+         * Use a library like 'zod' or 'joi' to verify that the email is actually
+         * an email and the password meets complexity requirements (e.g., 8+ chars).
+         */
 
-        // 2. check if the user exist (if exist then throw error)
+        // CONFLICT CHECK: Ensure the identity is unique.
+        // Using parameterized queries ($1) is MANDATORY to prevent SQL Injection.
+        const user = await pool.query("SELECT * FROM users WHERE user_email=$1", [email]);
 
-        const user = await pool.query("SELECT * FROM users WHERE user_email=$1",[email]);
-        //console.log('user: ',user);
-       
-        if(user.rows.length !==0){
-           return res.status(401).send("User Already Exist");
+        if (user.rows.length !== 0) {
+            // 401 Unauthorized or 409 Conflict is appropriate here.
+            return res.status(401).send("User Already Exist");
         }
-    
-        // 3. If user doesn't exist then bcrypt its password
-        
+
+        // SECURE HASHING: Transform plain text into a secure hash.
         const saltRound = 10;
         const salt = await bcrypt.genSalt(saltRound);
         const bcryptPassword = await bcrypt.hash(password, salt);
 
-
-        
-        // 4. Save user into our database 'jwtauth'
-
+        // PERSISTENCE: Save to the database.
+        // 'RETURNING *' is a Postgres feature that gives us the new record immediately.
         const newUser = await pool.query(
-            "INSERT INTO users (user_name, user_email, user_password) VALUES ($1,$2,$3) RETURNING *", 
-            [name,email,bcryptPassword]);
-        console.log('newUser',newUser);
+            "INSERT INTO users (user_name, user_email, user_password) VALUES ($1,$2,$3) RETURNING *",
+            [name, email, bcryptPassword]
+        );
 
-        // 5. generating json web token for the users
-        
+        // SESSION GRANT: Give the user a "ticket" (JWT) so they don't have to log in again immediately.
         const token = jwtGenerator(newUser.rows[0].user_id);
-        console.log('token: ',{token});
-        res.json({token});
 
-        
+        res.json({ token });
+
     } catch (error) {
+        /**
+         * PRODUCTION TIP: Error Logging
+         * Never send the raw 'error' object to the client; it could reveal
+         * your database structure or internal paths to hackers.
+         * Use a logger (Winston/Pino) to save the error for the developers.
+         */
         console.error(error.message);
         return res.status(500).send("Server Error");
     }
-})
+});
 
-router.post('/login', async(req,res)=>{
-    const {name, email,password} = req.body;
-
+/**
+ * ROUTE: /auth/login
+ * PURPOSE: Verify identity and issue a new access token.
+ */
+router.post('/login', async (req, res) => {
     try {
-        // 1. Destructure the req.body
-        const {name, email, password} = req.body;
+        const { name, email, password } = req.body;
 
-        // 2. Check if user exist or not (If not exist then throw an error)
+        // IDENTITY LOOKUP: Does this person exist?
         const user = await pool.query(
-            "SELECT * FROM users WHERE user_name=$1 && user_email=$2",
-            [name, email]);
-        if (!user)
+            "SELECT * FROM users WHERE user_name=$1 AND user_email=$2",
+            [name, email]
+        );
+
+        if (user.rows.length === 0) {
+            // PRODUCTION TIP: Avoid "User not found" messages.
+            // Saying "Invalid Credentials" is safer because it doesn't tell a hacker
+            // if a specific email exists in your system or not.
             return res.status(401).send("Invalid Credentials.");
-        
-        // 3. If exist then match the password with database record
-        const validPassword = await bcrypt.compare(password,user.rows[0].user_password);
-        if(!validPassword)
+        }
+
+        // CREDENTIAL VERIFICATION: Compare the provided password with the stored hash.
+        const validPassword = await bcrypt.compare(password, user.rows[0].user_password);
+
+        if (!validPassword) {
             return res.status(401).send("Invalid Password");
-            
-        // 4. Give the user a token
+        }
+
+        // ISSUE TOKEN: User is verified, grant access.
         const token = jwtGenerator(user.rows[0].user_id);
-        res.json({token});
+        res.json({ token });
 
     } catch (error) {
         console.error(error.message);
-        res.status(500).send("Server Error")
+        res.status(500).send("Server Error");
     }
-})
-
+});
 
 module.exports = router;

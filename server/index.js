@@ -1,38 +1,54 @@
 const express = require('express');
 const app = express();
-console.log(typeof app);
-const cors= require('cors');
+const cors = require('cors');
 const pool = require('./db/db_connection');
 const jwtAuth = require('./routes/jwtAuth');
 const port = 5300;
 
+// ==========================================
+// GLOBAL MIDDLEWARES
+// ==========================================
 
-//MIDDLEWARES
-/*express.json() is the function that parse the incoming request body into the JSON payload. 
-    This method returns the middleware that only parses JSON and only looks at the requests
-    where the content-type header matches the type option. For eg. {content-type: 'application/json'}
-    
-    JSON PAYLOAD--> Payload is the essential information in a data block that you send to or 
-    receive from the serverwhen making API requests.
-    */
-app.use(express.json()) 
+/**
+ * PRODUCTION TIP: Body Parsing
+ * express.json() is essential for modern APIs. It allows the server to read the 'body' of
+ * POST/PUT requests. In a massive production app, you might add size limits here
+ * (e.g., app.use(express.json({ limit: '10kb' }))) to prevent Denial of Service (DoS)
+ * attacks where a user sends a gigabyte of JSON to crash your server.
+ */
+app.use(express.json());
 
-
-/*Calling app.use(cors()). What it doing is basically making your server accessible to any domain that requests 
-a resource from your server via a browser.*/
-
+/**
+ * PRODUCTION TIP: CORS (Cross-Origin Resource Sharing)
+ * By default, browsers block requests to a different domain for security.
+ * In production, you should NOT use cors() without options. Instead, specify
+ * which domains are allowed to call your API:
+ * app.use(cors({ origin: 'https://your-official-website.com' }));
+ */
 app.use(cors());
 
+// ==========================================
+// API ROUTES (Routing Layer)
+// ==========================================
 
-
-//ROUTES
-
-// Registration and Login Routes
-
+/**
+ * PRODUCTION TIP: Route Versioning
+ * Professional APIs usually version their routes (e.g., /api/v1/auth).
+ * This prevents breaking the app for users when you introduce major changes in v2.
+ * Here, we mount our authentication logic under the '/auth' prefix.
+ */
 app.use('/auth', jwtAuth);
 
+/**
+ * PRODUCTION TIP: Global Error Handling
+ * Every production API needs a "Catch-All" error handler at the end of the middleware chain.
+ * This prevents the server from crashing and avoids leaking sensitive stack traces to the user.
+ * Example:
+ * app.use((err, req, res, next) => {
+ *    res.status(500).json({ error: 'Something went wrong on our end!' });
+ * });
+ */
 
-
-app.listen(port,()=>{
-    console.log(`server is running on port ${port}`);
-})
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+});
