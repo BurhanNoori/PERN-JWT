@@ -2,6 +2,7 @@ const router = require('express').Router();
 const pool = require('../db/db_connection');
 const bcrypt = require('bcrypt');
 const jwtGenerator = require('../utils/jwtGenerator');
+const authorize = require('../middleware/authorization'); // Import the "Bouncer" middleware
 
 /**
  * ============================================================================
@@ -13,9 +14,7 @@ const jwtGenerator = require('../utils/jwtGenerator');
 /**
  * ROUTE: /auth/register
  * PURPOSE: Onboard a new user by creating their identity in the database.
- *
- * PRODUCTION FLOW:
- * 1. Input Validation -> 2. Conflict Check -> 3. Secure Hashing -> 4. Persistence -> 5. Session Grant
+ * ACCESS: PUBLIC (Anyone can register)
  */
 router.post('/register', async (req, res) => {
     try {
@@ -37,19 +36,18 @@ router.post('/register', async (req, res) => {
             return res.status(401).send("User Already Exist");
         }
 
-        // SECURE HASHING: Transform plain text into a secure hash.
+        // SECURE HASHING
         const saltRound = 10;
         const salt = await bcrypt.genSalt(saltRound);
         const bcryptPassword = await bcrypt.hash(password, salt);
 
-        // PERSISTENCE: Save to the database.
-        // 'RETURNING *' is a Postgres feature that gives us the new record immediately.
+        // PERSISTENCE
         const newUser = await pool.query(
             "INSERT INTO users (user_name, user_email, user_password) VALUES ($1,$2,$3) RETURNING *",
             [name, email, bcryptPassword]
         );
 
-        // SESSION GRANT: Give the user a "ticket" (JWT) so they don't have to log in again immediately.
+        // SESSION GRANT
         const token = jwtGenerator(newUser.rows[0].user_id);
 
         res.json({ token });
@@ -69,12 +67,13 @@ router.post('/register', async (req, res) => {
 /**
  * ROUTE: /auth/login
  * PURPOSE: Verify identity and issue a new access token.
+ * ACCESS: PUBLIC (Anyone can attempt to login)
  */
 router.post('/login', async (req, res) => {
     try {
         const { name, email, password } = req.body;
 
-        // IDENTITY LOOKUP: Does this person exist?
+        // IDENTITY LOOKUP
         const user = await pool.query(
             "SELECT * FROM users WHERE user_name=$1 AND user_email=$2",
             [name, email]
@@ -87,14 +86,14 @@ router.post('/login', async (req, res) => {
             return res.status(401).send("Invalid Credentials.");
         }
 
-        // CREDENTIAL VERIFICATION: Compare the provided password with the stored hash.
+        // CREDENTIAL VERIFICATION
         const validPassword = await bcrypt.compare(password, user.rows[0].user_password);
 
         if (!validPassword) {
             return res.status(401).send("Invalid Password");
         }
 
-        // ISSUE TOKEN: User is verified, grant access.
+        // ISSUE TOKEN
         const token = jwtGenerator(user.rows[0].user_id);
         res.json({ token });
 
@@ -107,22 +106,23 @@ router.post('/login', async (req, res) => {
 /**
  * ROUTE: /auth/profile
  * PURPOSE: Return the user's profile information.
- * NOTE: This route is protected by the 'authorization' middleware, which checks for a valid JWT.
- *       If the token is valid, it adds 'req.user' (the user ID) to the request object.
- *       If not, it returns a 403 Forbidden error.
- *       This is a common pattern in production APIs to protect sensitive routes.
+ * ACCESS: PROTECTED (Requires a valid JWT token)
+ *
+ * Note the 'authorize' middleware inserted here. It runs BEFORE the async function.
  */
+router.get('/profile', authorize, async (req, res) => {
+    // The 'authorize' middleware has already verified the token
+    // and attached the user ID to req.user.
+    const userId = req.user.id;
 
-router.get('/profile', async (req, res) => {
-    const userId = req.user;
     try {
-        pool.query("SELECT * FROM users where user_id=$1", [userId], (err, result) => {
-            if (err) {
-                console.error(err.message);
-                return res.status(500).send("Server Error");
-            }
-            res.json(result.rows[0]); // It will return the row of the users table as JSON
-        });
+        const result = await pool.query("SELECT user_id, user_name, user_email FROM users WHERE user_id=$1", [userId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).send("User not found");
+        }
+
+        res.json(result.rows[0]);
     } catch (error) {
         console.error(error.message);
         res.status(500).send("Server Error");
