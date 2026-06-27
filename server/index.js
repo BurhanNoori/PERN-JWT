@@ -3,7 +3,10 @@ const app = express();
 const cors = require('cors');
 const pool = require('./db/db_connection');
 const jwtAuth = require('./routes/jwtAuth');
-const port = 5300;
+
+
+require('dotenv').config(); // Load environment variables from .env file
+const PORT = process.env.SERVER_PORT || 5300;
 
 // ==========================================
 // GLOBAL MIDDLEWARES
@@ -49,6 +52,6 @@ app.use('/auth', jwtAuth);
  * });
  */
 
-app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
 });

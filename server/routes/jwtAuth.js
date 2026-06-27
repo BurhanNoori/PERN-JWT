@@ -104,4 +104,29 @@ router.post('/login', async (req, res) => {
     }
 });
 
+/**
+ * ROUTE: /auth/profile
+ * PURPOSE: Return the user's profile information.
+ * NOTE: This route is protected by the 'authorization' middleware, which checks for a valid JWT.
+ *       If the token is valid, it adds 'req.user' (the user ID) to the request object.
+ *       If not, it returns a 403 Forbidden error.
+ *       This is a common pattern in production APIs to protect sensitive routes.
+ */
+
+router.get('/profile', async (req, res) => {
+    const userId = req.user;
+    try {
+        pool.query("SELECT * FROM users where user_id=$1", [userId], (err, result) => {
+            if (err) {
+                console.error(err.message);
+                return res.status(500).send("Server Error");
+            }
+            res.json(result.rows[0]); // It will return the row of the users table as JSON
+        });
+    } catch (error) {
+        console.error(error.message);
+        res.status(500).send("Server Error");
+    }
+});
+
 module.exports = router;
